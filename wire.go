@@ -194,3 +194,9 @@ type StructFields struct{}
 func FieldsOf(structType interface{}, fieldNames ...string) StructFields {
 	return StructFields{}
 }
+
+type LazyProvider struct{}
+
+func Lazy(typ interface{}) LazyProvider {
+	return LazyProvider{}
+}

@@ -53,8 +53,11 @@ func (p *providerSetSrc) description(fset *token.FileSet, typ types.Type) string
 	switch {
 	case p.Provider != nil:
 		kind := "provider"
-		if p.Provider.IsStruct {
+		switch {
+		case p.Provider.IsStruct:
 			kind = "struct provider"
+		case p.Provider.IsLazy:
+			kind = "lazy provider"
 		}
 		return fmt.Sprintf("%s %s(%s)", kind, quoted(p.Provider.Name), fset.Position(p.Provider.Pos))
 	case p.Binding != nil:
@@ -165,6 +168,12 @@ type Provider struct {
 	// IsStruct is true if this provider is a named struct type.
 	// Otherwise it's a function.
 	IsStruct bool
+
+	// IsLazy indicates if this provider is lazy.
+	IsLazy bool
+
+	// LazyType indicates the return type of the function.
+	LazyType types.Type
 
 	// Out is the set of types this provider produces. It will always
 	// contain at least one type.
@@ -576,6 +585,9 @@ func (oc *objectCache) processExpr(info *types.Info, pkgPath string, expr ast.Ex
 				return nil, []error{notePosition(exprPos, err)}
 			}
 			return v, nil
+		case "Lazy":
+			lzy, errs := oc.processLazy(oc.fset, info, call)
+			return lzy, notePositionAll(exprPos, errs)
 		default:
 			return nil, []error{notePosition(exprPos, errors.New("unknown pattern"))}
 		}
@@ -588,6 +600,45 @@ func (oc *objectCache) processExpr(info *types.Info, pkgPath string, expr ast.Ex
 		return p, nil
 	}
 	return nil, []error{notePosition(exprPos, errors.New("unknown pattern"))}
+}
+
+func (oc *objectCache) processLazy(fset *token.FileSet, info *types.Info, call *ast.CallExpr) (*Provider, []error) {
+	// Assumes that call.Fun is wire.Lazy with 1 argument.
+	if len(call.Args) != 1 {
+		return nil, []error{errors.New("call to Lazy takes exactly one argument")}
+	}
+
+	funcProv := call.Args[0]
+
+	obj := qualifiedIdentObject(info, funcProv)
+	if obj == nil {
+		return nil, []error{errors.New("argument to Lazy must be a provider")}
+	}
+
+	item, errs := oc.get(obj)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
+	prov, ok := item.(*Provider)
+	if !ok {
+		return nil, []error{errors.New("argument to Lazy must be a provider")}
+	}
+
+	prov.IsLazy = true
+	prov.LazyType = info.TypeOf(funcProv)
+	lazySig := obj.Type().(*types.Signature)
+	args := []*types.Var{lazySig.Results().At(0)}
+	if prov.HasErr {
+		i := 1
+		if prov.HasCleanup {
+			i++
+		}
+		args = append(args, lazySig.Results().At(i))
+	}
+	results := types.NewTuple(args...)
+	prov.LazyType = types.NewSignatureType(nil, nil, nil, nil, results, false)
+	return prov, nil
 }
 
 func (oc *objectCache) processNewSet(info *types.Info, pkgPath string, call *ast.CallExpr, args *InjectorArgs, varName string) (*ProviderSet, []error) {
@@ -629,6 +680,7 @@ func (oc *objectCache) processNewSet(info *types.Info, pkgPath string, call *ast
 	if len(errs) > 0 {
 		return nil, errs
 	}
+
 	if errs := verifyAcyclic(pset.providerMap, oc.hasher); len(errs) > 0 {
 		return nil, errs
 	}

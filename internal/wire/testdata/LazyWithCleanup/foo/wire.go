@@ -1,4 +1,4 @@
-// Copyright 2018 The WiTestWire/Lazyre Authors
+// Copyright 2018 The Wire Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,45 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build wireinject
+// +build wireinject
+
 package main
 
 import (
-	"fmt"
-	"sync"
-
 	"github.com/google/wire"
 )
 
-func main() {
-	fb := injectFooBar()
-	pfb := injectPartFooBar()
-	fmt.Println(fb.Foo, fb.Bar)
-	fmt.Println(pfb.Foo, pfb.Bar)
+func injectFooBar() (FooBar, func()) {
+	wire.Build(Set)
+	return 0, nil
 }
-
-type Foo int
-type Bar int
-
-type FooBar struct {
-	mu  sync.Mutex `wire:"-"`
-	Foo Foo
-	Bar Bar
-}
-
-func provideFoo() Foo {
-	return 41
-}
-
-func provideBar() Bar {
-	return 1
-}
-
-var Set = wire.NewSet(
-	wire.Struct(new(FooBar), "*"),
-	provideFoo,
-	provideBar)
-
-var PartSet = wire.NewSet(
-	wire.Struct(new(FooBar), "Foo"),
-	provideFoo,
-)

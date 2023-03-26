@@ -1,4 +1,4 @@
-// Copyright 2018 The WiTestWire/Lazyre Authors
+// Copyright 2018 The Wire Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,41 +16,31 @@ package main
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/google/wire"
 )
 
 func main() {
-	fb := injectFooBar()
-	pfb := injectPartFooBar()
-	fmt.Println(fb.Foo, fb.Bar)
-	fmt.Println(pfb.Foo, pfb.Bar)
+	fmt.Println(injectFooBar())
 }
 
 type Foo int
 type Bar int
-
-type FooBar struct {
-	mu  sync.Mutex `wire:"-"`
-	Foo Foo
-	Bar Bar
-}
+type FooBar int
 
 func provideFoo() Foo {
-	return 41
+	return 40
 }
 
-func provideBar() Bar {
-	return 1
+func provideBar(fooFn func() Foo) Bar {
+	return Bar(fooFn()) + Bar(2)
+}
+
+func provideFooBar(barFn func() Bar) FooBar {
+	return FooBar(barFn())
 }
 
 var Set = wire.NewSet(
-	wire.Struct(new(FooBar), "*"),
-	provideFoo,
-	provideBar)
-
-var PartSet = wire.NewSet(
-	wire.Struct(new(FooBar), "Foo"),
-	provideFoo,
-)
+	wire.Lazy(provideFoo),
+	wire.Lazy(provideBar),
+	provideFooBar)

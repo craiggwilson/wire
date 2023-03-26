@@ -84,6 +84,7 @@ func Generate(ctx context.Context, wd string, env []string, patterns []string, o
 	if opts == nil {
 		opts = &GenerateOptions{}
 	}
+
 	pkgs, errs := load(ctx, wd, env, opts.Tags, patterns)
 	if len(errs) > 0 {
 		return nil, errs
@@ -324,6 +325,7 @@ func (g *gen) inject(pos token.Pos, name string, sig *types.Signature, set *Prov
 			return notePosition(g.pkg.Fset.Position(pos), fmt.Errorf("inject %s: %v", name, e))
 		})
 	}
+
 	type pendingVar struct {
 		name     string
 		expr     ast.Expr
@@ -643,6 +645,8 @@ func injectPass(name string, sig *types.Signature, calls []call, set *ProviderSe
 			ig.structProviderCall(lname, c)
 		case funcProviderCall:
 			ig.funcProviderCall(lname, c, injectSig)
+		case lazyProviderCall:
+			ig.lazyProviderCall(lname, c)
 		case valueExpr:
 			ig.valueExpr(lname, c)
 		case selectorExpr:
@@ -709,6 +713,79 @@ func (ig *injectorGen) funcProviderCall(lname string, c *call, injectSig outputS
 		ig.p(", err\n")
 		ig.p("\t}\n")
 	}
+}
+
+func (ig *injectorGen) lazyProviderCall(lname string, c *call) {
+	typ := types.TypeString(c.out, ig.g.qualifyPkg)
+	instanceTyp := types.TypeString(c.out.(*types.Signature).Results().At(0).Type(), ig.g.qualifyPkg)
+
+	ig.p("\t%s", lname)
+	if c.hasCleanup {
+		cname := disambiguate("cleanup", ig.nameInInjector)
+		ig.cleanupNames = append(ig.cleanupNames, cname)
+		ig.p("\t\t, %s", cname)
+	}
+	ig.p(":= func()")
+	if c.hasCleanup {
+		ig.p("(")
+	}
+	ig.p("%s", typ)
+	if c.hasCleanup {
+		ig.p(", func())")
+	}
+	ig.p(" {\n")
+	ig.p("\t\tvar instance %s\n", instanceTyp)
+	ig.p("\t\tvar wasSet bool\n")
+	if c.hasCleanup {
+		ig.p("\t\tvar cleanup func()\n")
+	}
+	if c.hasErr {
+		ig.p("\t\tvar %s error\n", ig.errVar)
+	}
+
+	ig.p("\t\treturn %s {\n", typ)
+	ig.p("\t\t\t\tif !wasSet {\n")
+	ig.p("\t\t\t\t\twasSet = true\n")
+
+	ig.p("\t\t\t\tinstance")
+	if c.hasCleanup {
+		ig.p(", cleanup")
+	}
+	if c.hasErr {
+		ig.p(", %s", ig.errVar)
+	}
+	ig.p(" = ")
+	ig.p("%s(", ig.g.qualifiedID(c.pkg.Name(), c.pkg.Path(), c.name))
+	for i, a := range c.args {
+		if i > 0 {
+			ig.p(", ")
+		}
+		if a < len(ig.paramNames) {
+			ig.p("%s", ig.paramNames[a])
+		} else {
+			ig.p("%s", ig.localNames[a-len(ig.paramNames)])
+		}
+	}
+	if c.varargs {
+		ig.p("...")
+	}
+	ig.p(")\n")
+	ig.p("\t\t\t}\n")
+	ig.p("\t\t\treturn instance")
+	if c.hasErr {
+		ig.p(", %s", ig.errVar)
+	}
+	ig.p("\n")
+	ig.p("\t\t}")
+	if c.hasCleanup {
+		ig.p(", func() {\n")
+		ig.p("\t\t\t\tif wasSet {\n")
+		ig.p("\t\t\t\t\tcleanup()\n")
+		ig.p("\t\t\t\t}")
+		ig.p("\t\t\t}")
+	}
+	ig.p("\n")
+	ig.p("\t}()\n")
 }
 
 func (ig *injectorGen) structProviderCall(lname string, c *call) {
@@ -820,6 +897,9 @@ func typeVariableName(t types.Type, defaultName string, transform func(string) s
 		if t.Name() != "" {
 			names = append(names, t.Name())
 		}
+	case *types.Signature:
+		n := typeVariableName(t.Results().At(0).Type(), defaultName, transform, collides)
+		names = append(names, n+"Func")
 	case *types.Named:
 		obj := t.Obj()
 		if name := obj.Name(); name != "" {

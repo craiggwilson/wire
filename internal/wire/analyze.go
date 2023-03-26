@@ -33,6 +33,7 @@ const (
 	structProvider
 	valueExpr
 	selectorExpr
+	lazyProviderCall
 )
 
 // A call represents a step of an injector function.  It may be either a
@@ -186,14 +187,17 @@ dfs:
 				}
 				args[i] = v.(int)
 			}
-			index.Set(curr.t, given.Len()+len(calls))
 			kind := funcProviderCall
+			index.Set(curr.t, given.Len()+len(calls))
 			fieldNames := []string(nil)
-			if p.IsStruct {
+			switch {
+			case p.IsStruct:
 				kind = structProvider
 				for _, arg := range p.Args {
 					fieldNames = append(fieldNames, arg.FieldName)
 				}
+			case p.IsLazy:
+				kind = lazyProviderCall
 			}
 			calls = append(calls, call{
 				kind:       kind,
@@ -243,6 +247,15 @@ dfs:
 				args:       args,
 				ptrToField: ptrToField,
 			})
+		// case pv.IsLazy():
+		// 	lp := pv.Lazy().Provider
+		// 	index.Set(curr.t, given.Len()+len(calls))
+		// 	calls = append(calls, call{
+		// 		kind: lazyProviderCall,
+		// 		name: lp.Name,
+		// 		pkg:  lp.Pkg,
+		// 		out:  lp.Out[0],
+		// 	})
 		default:
 			panic("unknown return value from ProviderSet.For")
 		}
@@ -370,13 +383,19 @@ func buildProviderMap(fset *token.FileSet, hasher typeutil.Hasher, set *Provider
 	// Process non-binding providers in new set.
 	for _, p := range set.Providers {
 		src := &providerSetSrc{Provider: p}
-		for _, typ := range p.Out {
-			if prevSrc := srcMap.At(typ); prevSrc != nil {
-				ec.add(bindingConflictError(fset, typ, set, src, prevSrc.(*providerSetSrc)))
-				continue
-			}
+		if p.IsLazy {
+			typ := p.LazyType
 			providerMap.Set(typ, &ProvidedType{t: typ, p: p})
 			srcMap.Set(typ, src)
+		} else {
+			for _, typ := range p.Out {
+				if prevSrc := srcMap.At(typ); prevSrc != nil {
+					ec.add(bindingConflictError(fset, typ, set, src, prevSrc.(*providerSetSrc)))
+					continue
+				}
+				providerMap.Set(typ, &ProvidedType{t: typ, p: p})
+				srcMap.Set(typ, src)
+			}
 		}
 	}
 	for _, v := range set.Values {
@@ -423,6 +442,7 @@ func buildProviderMap(fset *token.FileSet, hasher typeutil.Hasher, set *Provider
 		providerMap.Set(b.Iface, concrete)
 		srcMap.Set(b.Iface, src)
 	}
+
 	if len(ec.errors) > 0 {
 		return nil, nil, ec.errors
 	}
@@ -465,11 +485,12 @@ func verifyAcyclic(providerMap *typeutil.Map, hasher typeutil.Hasher) []error {
 				// Injector arguments do not have dependencies.
 			case pt.IsProvider() || pt.IsField():
 				var args []types.Type
-				if pt.IsProvider() {
+				switch {
+				case pt.IsProvider():
 					for _, arg := range pt.Provider().Args {
 						args = append(args, arg.Type)
 					}
-				} else {
+				default:
 					args = append(args, pt.Field().Parent)
 				}
 				for _, a := range args {
@@ -480,10 +501,11 @@ func verifyAcyclic(providerMap *typeutil.Map, hasher typeutil.Hasher) []error {
 							fmt.Fprintf(sb, "cycle for %s:\n", types.TypeString(a, nil))
 							for j := i; j < len(curr); j++ {
 								t := providerMap.At(curr[j]).(*ProvidedType)
-								if t.IsProvider() {
+								switch {
+								case t.IsProvider():
 									p := t.Provider()
 									fmt.Fprintf(sb, "%s (%s.%s) ->\n", types.TypeString(curr[j], nil), p.Pkg.Path(), p.Name)
-								} else {
+								default:
 									p := t.Field()
 									fmt.Fprintf(sb, "%s (%s.%s) ->\n", types.TypeString(curr[j], nil), p.Parent, p.Name)
 								}
