@@ -14,7 +14,7 @@
 
 // Package wire contains directives for Wire code generation.
 // For an overview of working with Wire, see the user guide at
-// https://github.com/google/wire/blob/master/docs/guide.md
+// https://github.com/craiggwilson/wire/blob/master/docs/guide.md
 //
 // The directives in this package are used as input to the Wire code generation
 // tool. The entry point of Wire's analysis are injector functions: function
@@ -115,7 +115,7 @@ func Bind(iface, to interface{}) Binding {
 }
 
 // bindToUsePointer is detected by the wire tool to indicate that Bind's second argument should take a pointer.
-// See https://github.com/google/wire/issues/120 for details.
+// See https://github.com/craiggwilson/wire/issues/120 for details.
 const bindToUsePointer = true
 
 // A ProvidedValue is an expression that is copied to the generated injector.
@@ -195,8 +195,15 @@ func FieldsOf(structType interface{}, fieldNames ...string) StructFields {
 	return StructFields{}
 }
 
+// LazyProvider represents a lazily executed provider.
 type LazyProvider struct{}
 
+// Lazy declares that a given provider should be distributed lazily. For example,
+// a provider called provideFoo that returns an instance of Foo will have code
+// generated to instead provider a func() Foo that contains lazy instantiation.
+//
+// func provideFoo() Foo { /* ... */ }
+// var Set = wire.NewSet(wire.Lazy(provideFoo))
 func Lazy(typ interface{}) LazyProvider {
 	return LazyProvider{}
 }

@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//+build wireinject
+//go:build wireinject
+// +build wireinject
 
 package main
 
 import (
 	_ "example.com/anon1" // intentionally duplicated
-	_ "example.com/anon1" // intentionally duplicated
 	_ "example.com/anon2"
-	"github.com/google/wire"
+
+	"github.com/craiggwilson/wire"
 )
 
 func injectFooBar() FooBar {
