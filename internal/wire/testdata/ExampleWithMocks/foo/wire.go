@@ -17,7 +17,7 @@
 package main
 
 import (
-	"github.com/google/wire"
+	"github.com/craiggwilson/wire"
 )
 
 // initApp returns a real app.
